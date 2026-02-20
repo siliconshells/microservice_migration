@@ -120,5 +120,5 @@ jobs:
           
           for INSTANCE_IP in $INSTANCE1_IP $INSTANCE2_IP; do
             scp -o StrictHostKeyChecking=no -i private_key.pem ./servers/docker-compose.yml ubuntu@$INSTANCE_IP:/home/ubuntu/
-            ssh -o StrictHostKeyChecking=no -i private_key.pem ubuntu@$INSTANCE_IP "export AWS_ACCOUNT_ID=$AWS_ACCOUNT_ID && export AWS_DEFAULT_REGION=us-east-1 && aws ecr get-login-password --region us-east-1 | sudo docker login --username AWS --password-stdin $ECR_REGISTRY && cd /home/ubuntu && sudo docker-compose down || true && sudo docker-compose pull && sudo docker-compose up -d"
+            ssh -o StrictHostKeyChecking=no -i private_key.pem ubuntu@$INSTANCE_IP "echo 'AWS_ACCOUNT_ID=$AWS_ACCOUNT_ID' > /home/ubuntu/.env && export AWS_DEFAULT_REGION=us-east-1 && aws ecr get-login-password --region us-east-1 | sudo docker login --username AWS --password-stdin $ECR_REGISTRY && cd /home/ubuntu && sudo -E docker-compose down || true && sudo -E docker-compose pull && sudo -E docker-compose up -d"
           done
