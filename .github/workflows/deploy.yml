@@ -1,0 +1,126 @@
+name: Build and Deploy Services
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    outputs:
+      instance1_ip: ${{ steps.tf-output.outputs.instance1_ip }}
+      instance2_ip: ${{ steps.tf-output.outputs.instance2_ip }}
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_wrapper: false
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Terraform Init
+        run: terraform init
+        working-directory: ./terraform
+      
+      - name: Terraform Apply
+        run: terraform apply -auto-approve -var="key_pair_name=${{ secrets.KEY_PAIR_NAME }}"
+        working-directory: ./terraform
+      
+      - name: Get Terraform Outputs
+        id: tf-output
+        run: |
+          echo "instance1_ip=$(terraform output -raw service1_instance_ip)" >> $GITHUB_OUTPUT
+          echo "instance2_ip=$(terraform output -raw service2_instance_ip)" >> $GITHUB_OUTPUT
+        working-directory: ./terraform
+      
+      - name: Configure EC2 Instances
+        env:
+          PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          INSTANCE1_IP: ${{ steps.tf-output.outputs.instance1_ip }}
+          INSTANCE2_IP: ${{ steps.tf-output.outputs.instance2_ip }}
+        run: |
+          echo "$PRIVATE_KEY" > private_key.pem
+          chmod 600 private_key.pem
+          
+          for INSTANCE_IP in $INSTANCE1_IP $INSTANCE2_IP; do
+            until ssh -o StrictHostKeyChecking=no -i private_key.pem ubuntu@$INSTANCE_IP 'echo ready'; do
+              echo "Waiting for instance $INSTANCE_IP..."
+              sleep 10
+            done
+            
+            ssh -o StrictHostKeyChecking=no -i private_key.pem ubuntu@$INSTANCE_IP << 'EOF'
+echo "export AWS_ACCOUNT_ID=${{ secrets.AWS_ACCOUNT_ID }}" >> ~/.bashrc
+source ~/.bashrc
+EOF
+          done
+
+  build-and-push:
+    needs: terraform
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Login to Amazon ECR
+        run: aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ env.ECR_REGISTRY }}
+      
+      - name: Build and push service1
+        run: |
+          docker build -t ${{ env.ECR_REGISTRY }}/service1:latest ./servers/service1
+          docker push ${{ env.ECR_REGISTRY }}/service1:latest
+      
+      - name: Build and push service2
+        run: |
+          docker build -t ${{ env.ECR_REGISTRY }}/service2:latest ./servers/service2
+          docker push ${{ env.ECR_REGISTRY }}/service2:latest
+
+  deploy:
+    needs: [terraform, build-and-push]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Deploy to EC2 instances
+        env:
+          PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          INSTANCE1_IP: ${{ needs.terraform.outputs.instance1_ip }}
+          INSTANCE2_IP: ${{ needs.terraform.outputs.instance2_ip }}
+        run: |
+          echo "$PRIVATE_KEY" > private_key.pem
+          chmod 600 private_key.pem
+          
+          for INSTANCE_IP in $INSTANCE1_IP $INSTANCE2_IP; do
+            scp -o StrictHostKeyChecking=no -i private_key.pem ./servers/docker-compose.yml ubuntu@$INSTANCE_IP:/home/ubuntu/
+            ssh -o StrictHostKeyChecking=no -i private_key.pem ubuntu@$INSTANCE_IP << 'EOF'
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${{ env.ECR_REGISTRY }}
+cd /home/ubuntu
+docker-compose down
+docker-compose pull
+docker-compose up -d
+EOF
+          done

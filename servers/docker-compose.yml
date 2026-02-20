@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  service1:
+    image: ${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/service1:latest
+    ports:
+      - "8080:5000"
+    restart: always
+    environment:
+      - SERVICE_NAME=service1
+
+  service2:
+    image: ${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/service2:latest
+    ports:
+      - "8081:5001"
+    restart: always
+    environment:
+      - SERVICE_NAME=service2
