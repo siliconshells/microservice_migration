@@ -36,10 +36,26 @@ jobs:
       
       - name: Clean up existing resources
         run: |
-          aws elbv2 delete-load-balancer --load-balancer-arn $(aws elbv2 describe-load-balancers --names services-alb --query 'LoadBalancers[0].LoadBalancerArn' --output text) 2>/dev/null || true
-          sleep 10
-          aws elbv2 delete-target-group --target-group-arn $(aws elbv2 describe-target-groups --names service1-tg --query 'TargetGroups[0].TargetGroupArn' --output text) 2>/dev/null || true
-          aws elbv2 delete-target-group --target-group-arn $(aws elbv2 describe-target-groups --names service2-tg --query 'TargetGroups[0].TargetGroupArn' --output text) 2>/dev/null || true
+          # Delete ALB and target groups
+          ALB_ARN=$(aws elbv2 describe-load-balancers --names services-alb --query 'LoadBalancers[0].LoadBalancerArn' --output text 2>/dev/null)
+          if [ "$ALB_ARN" != "None" ] && [ ! -z "$ALB_ARN" ]; then
+            aws elbv2 delete-load-balancer --load-balancer-arn "$ALB_ARN" 2>/dev/null || true
+            sleep 15
+          fi
+          
+          TG1=$(aws elbv2 describe-target-groups --names service1-tg --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null)
+          [ "$TG1" != "None" ] && [ ! -z "$TG1" ] && aws elbv2 delete-target-group --target-group-arn "$TG1" 2>/dev/null || true
+          
+          TG2=$(aws elbv2 describe-target-groups --names service2-tg --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null)
+          [ "$TG2" != "None" ] && [ ! -z "$TG2" ] && aws elbv2 delete-target-group --target-group-arn "$TG2" 2>/dev/null || true
+          
+          # Delete EC2 instances
+          for INSTANCE_ID in $(aws ec2 describe-instances --filters "Name=tag:Name,Values=service-instance-1,service-instance-2" "Name=instance-state-name,Values=running,stopped" --query 'Reservations[].Instances[].InstanceId' --output text); do
+            aws ec2 terminate-instances --instance-ids $INSTANCE_ID 2>/dev/null || true
+          done
+          sleep 30
+          
+          # Delete IAM resources
           aws iam remove-role-from-instance-profile --instance-profile-name ec2-ecr-profile --role-name ec2-ecr-role 2>/dev/null || true
           aws iam delete-instance-profile --instance-profile-name ec2-ecr-profile 2>/dev/null || true
           aws iam detach-role-policy --role-name ec2-ecr-role --policy-arn arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly 2>/dev/null || true
@@ -48,6 +64,41 @@ jobs:
       
       - name: Terraform Destroy (Clean Slate)
         run: terraform destroy -auto-approve -var="key_pair_name=${{ secrets.KEY_PAIR_NAME }}" || true
+        working-directory: ./terraform
+      
+      - name: Import existing VPC resources
+        run: |
+          VPC_ID=$(aws ec2 describe-vpcs --filters "Name=tag:Name,Values=services-vpc" --query 'Vpcs[0].VpcId' --output text 2>/dev/null)
+          if [ "$VPC_ID" != "None" ] && [ ! -z "$VPC_ID" ]; then
+            terraform import aws_vpc.main "$VPC_ID" 2>/dev/null || true
+            
+            SUBNET1=$(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" "Name=tag:Name,Values=services-public-subnet" --query 'Subnets[0].SubnetId' --output text 2>/dev/null)
+            [ "$SUBNET1" != "None" ] && [ ! -z "$SUBNET1" ] && terraform import aws_subnet.public "$SUBNET1" 2>/dev/null || true
+            
+            SUBNET2=$(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" "Name=tag:Name,Values=services-public-subnet-2" --query 'Subnets[0].SubnetId' --output text 2>/dev/null)
+            [ "$SUBNET2" != "None" ] && [ ! -z "$SUBNET2" ] && terraform import aws_subnet.public2 "$SUBNET2" 2>/dev/null || true
+            
+            IGW=$(aws ec2 describe-internet-gateways --filters "Name=attachment.vpc-id,Values=$VPC_ID" --query 'InternetGateways[0].InternetGatewayId' --output text 2>/dev/null)
+            [ "$IGW" != "None" ] && [ ! -z "$IGW" ] && terraform import aws_internet_gateway.main "$IGW" 2>/dev/null || true
+            
+            RT=$(aws ec2 describe-route-tables --filters "Name=vpc-id,Values=$VPC_ID" "Name=tag:Name,Values=services-public-rt" --query 'RouteTables[0].RouteTableId' --output text 2>/dev/null)
+            [ "$RT" != "None" ] && [ ! -z "$RT" ] && terraform import aws_route_table.public "$RT" 2>/dev/null || true
+            
+            SG_EC2=$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" "Name=group-name,Values=ec2-services-sg" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null)
+            [ "$SG_EC2" != "None" ] && [ ! -z "$SG_EC2" ] && terraform import aws_security_group.ec2 "$SG_EC2" 2>/dev/null || true
+            
+            SG_ALB=$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" "Name=group-name,Values=alb-sg" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null)
+            [ "$SG_ALB" != "None" ] && [ ! -z "$SG_ALB" ] && terraform import aws_security_group.alb "$SG_ALB" 2>/dev/null || true
+          fi
+          
+          terraform import aws_ecr_repository.service1 service1 2>/dev/null || true
+          terraform import aws_ecr_repository.service2 service2 2>/dev/null || true
+        working-directory: ./terraform
+      
+      - name: Import ECR repositories
+        run: |
+          terraform import aws_ecr_repository.service1 service1 2>/dev/null || true
+          terraform import aws_ecr_repository.service2 service2 2>/dev/null || true
         working-directory: ./terraform
       
       - name: Terraform Apply
