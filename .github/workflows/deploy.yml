@@ -34,6 +34,23 @@ jobs:
         run: terraform init
         working-directory: ./terraform
       
+      - name: Import Existing Resources
+        run: |
+          terraform import aws_iam_role.ec2_role ec2-ecr-role 2>/dev/null || true
+          terraform import aws_iam_instance_profile.ec2_profile ec2-ecr-profile 2>/dev/null || true
+          terraform import aws_ecr_repository.service1 service1 2>/dev/null || true
+          terraform import aws_ecr_repository.service2 service2 2>/dev/null || true
+          
+          ALB_ARN=$(aws elbv2 describe-load-balancers --names services-alb --query 'LoadBalancers[0].LoadBalancerArn' --output text 2>/dev/null || echo "")
+          [ ! -z "$ALB_ARN" ] && [ "$ALB_ARN" != "None" ] && terraform import aws_lb.main "$ALB_ARN" 2>/dev/null || true
+          
+          TG1_ARN=$(aws elbv2 describe-target-groups --names service1-tg --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null || echo "")
+          [ ! -z "$TG1_ARN" ] && [ "$TG1_ARN" != "None" ] && terraform import aws_lb_target_group.service1 "$TG1_ARN" 2>/dev/null || true
+          
+          TG2_ARN=$(aws elbv2 describe-target-groups --names service2-tg --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null || echo "")
+          [ ! -z "$TG2_ARN" ] && [ "$TG2_ARN" != "None" ] && terraform import aws_lb_target_group.service2 "$TG2_ARN" 2>/dev/null || true
+        working-directory: ./terraform
+      
       - name: Terraform Apply
         run: terraform apply -auto-approve -var="key_pair_name=${{ secrets.KEY_PAIR_NAME }}"
         working-directory: ./terraform
