@@ -118,7 +118,9 @@ jobs:
           echo "$PRIVATE_KEY" > private_key.pem
           chmod 600 private_key.pem
           
+          ECR_PASSWORD=$(aws ecr get-login-password --region us-east-1)
+          
           for INSTANCE_IP in $INSTANCE1_IP $INSTANCE2_IP; do
             scp -o StrictHostKeyChecking=no -i private_key.pem ./servers/docker-compose.yml ubuntu@$INSTANCE_IP:/home/ubuntu/
-            ssh -o StrictHostKeyChecking=no -i private_key.pem ubuntu@$INSTANCE_IP "echo 'AWS_ACCOUNT_ID=$AWS_ACCOUNT_ID' > /home/ubuntu/.env && until aws sts get-caller-identity 2>/dev/null; do echo 'Waiting for IAM role...'; sleep 5; done && aws ecr get-login-password --region us-east-1 | sudo docker login --username AWS --password-stdin $ECR_REGISTRY && cd /home/ubuntu && sudo docker-compose down || true && sudo docker-compose pull && sudo docker-compose up -d"
+            ssh -o StrictHostKeyChecking=no -i private_key.pem ubuntu@$INSTANCE_IP "echo 'AWS_ACCOUNT_ID=$AWS_ACCOUNT_ID' > /home/ubuntu/.env && echo '$ECR_PASSWORD' | sudo docker login --username AWS --password-stdin $ECR_REGISTRY && cd /home/ubuntu && sudo docker-compose down || true && sudo docker-compose pull && sudo docker-compose up -d"
           done
