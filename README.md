@@ -1,4 +1,5 @@
 # Microservices Deployment on AWS
+[![Build and Deploy Services](https://github.com/siliconshells/microservice_migration/actions/workflows/deploy.yml/badge.svg)](https://github.com/siliconshells/microservice_migration/actions/workflows/deploy.yml)  
 
 ## Architecture
 
