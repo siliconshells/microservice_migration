@@ -49,6 +49,19 @@ jobs:
           
           TG2_ARN=$(aws elbv2 describe-target-groups --names service2-tg --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null || echo "")
           [ ! -z "$TG2_ARN" ] && [ "$TG2_ARN" != "None" ] && terraform import aws_lb_target_group.service2 "$TG2_ARN" 2>/dev/null || true
+          
+          if [ ! -z "$ALB_ARN" ] && [ "$ALB_ARN" != "None" ]; then
+            LISTENER_ARN=$(aws elbv2 describe-listeners --load-balancer-arn "$ALB_ARN" --query 'Listeners[0].ListenerArn' --output text 2>/dev/null || echo "")
+            [ ! -z "$LISTENER_ARN" ] && [ "$LISTENER_ARN" != "None" ] && terraform import aws_lb_listener.http "$LISTENER_ARN" 2>/dev/null || true
+            
+            if [ ! -z "$LISTENER_ARN" ] && [ "$LISTENER_ARN" != "None" ]; then
+              RULE1_ARN=$(aws elbv2 describe-rules --listener-arn "$LISTENER_ARN" --query 'Rules[?Priority==`100`].RuleArn' --output text 2>/dev/null || echo "")
+              [ ! -z "$RULE1_ARN" ] && [ "$RULE1_ARN" != "None" ] && terraform import aws_lb_listener_rule.service1 "$RULE1_ARN" 2>/dev/null || true
+              
+              RULE2_ARN=$(aws elbv2 describe-rules --listener-arn "$LISTENER_ARN" --query 'Rules[?Priority==`200`].RuleArn' --output text 2>/dev/null || echo "")
+              [ ! -z "$RULE2_ARN" ] && [ "$RULE2_ARN" != "None" ] && terraform import aws_lb_listener_rule.service2 "$RULE2_ARN" 2>/dev/null || true
+            fi
+          fi
         working-directory: ./terraform
       
       - name: Terraform Apply
