@@ -34,6 +34,18 @@ jobs:
         run: terraform init
         working-directory: ./terraform
       
+      - name: Clean up existing resources
+        run: |
+          aws elbv2 delete-load-balancer --load-balancer-arn $(aws elbv2 describe-load-balancers --names services-alb --query 'LoadBalancers[0].LoadBalancerArn' --output text) 2>/dev/null || true
+          sleep 10
+          aws elbv2 delete-target-group --target-group-arn $(aws elbv2 describe-target-groups --names service1-tg --query 'TargetGroups[0].TargetGroupArn' --output text) 2>/dev/null || true
+          aws elbv2 delete-target-group --target-group-arn $(aws elbv2 describe-target-groups --names service2-tg --query 'TargetGroups[0].TargetGroupArn' --output text) 2>/dev/null || true
+          aws iam remove-role-from-instance-profile --instance-profile-name ec2-ecr-profile --role-name ec2-ecr-role 2>/dev/null || true
+          aws iam delete-instance-profile --instance-profile-name ec2-ecr-profile 2>/dev/null || true
+          aws iam detach-role-policy --role-name ec2-ecr-role --policy-arn arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly 2>/dev/null || true
+          aws iam delete-role --role-name ec2-ecr-role 2>/dev/null || true
+        working-directory: ./terraform
+      
       - name: Terraform Destroy (Clean Slate)
         run: terraform destroy -auto-approve -var="key_pair_name=${{ secrets.KEY_PAIR_NAME }}" || true
         working-directory: ./terraform
