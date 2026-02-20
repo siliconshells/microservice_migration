@@ -232,6 +232,7 @@ All AWS resources have been torn down.
 - docker ps on both EC2 instances
 - ALB DNS + curl responses
 
-## Files in root repository
+## Files and folders in root repository
 - verify_endpoints.py: Health check script
-- docker-compose.yml: File used on EC2 instances
+- docker-compose.yml: File used on EC2 
+- Terraform files: In terraform folder
